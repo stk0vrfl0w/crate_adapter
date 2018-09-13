@@ -34,6 +34,21 @@ Create the following table in your CrateDB database:
       PRIMARY KEY ("timestamp", "labels_hash", "day__generated")
     ) PARTITIONED BY ("day__generated");
 
+Or, if using CockroachDB:
+
+.. code-block:: sql
+
+  CREATE TABLE "metrics" (
+      "timestamp" TIMESTAMP NOT NULL,
+      "labels_hash" STRING NOT NULL,
+      "labels" JSON NULL,
+      "value" DOUBLE PRECISION NULL,
+      "valueRaw" INT NULL,
+      "day__generated" TIMESTAMP NOT NULL AS (date_trunc('day', "timestamp")) STORED,
+      CONSTRAINT "primary" PRIMARY KEY ("timestamp", "labels_hash", "day__generated"),
+      INVERTED INDEX metrics_labels_idx ("labels")
+  );
+
 Depending on data volume and retention you might want to optimize your partitioning scheme
 and create hourly, weekly,... partitions.
 

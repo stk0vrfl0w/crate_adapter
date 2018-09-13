@@ -28,8 +28,11 @@ import (
 const version = "0.3.0-dev"
 
 var (
+	knownDialects = []string{"crate", "cockroach"}
+
 	listenAddress = flag.String("web.listen-address", ":9268", "Address to listen on for Prometheus requests.")
 	configFile    = flag.String("config.file", "config.yml", "Path to the CrateDB endpoints configuration file.")
+	dialect       = flag.String("dialect", "crate", fmt.Sprintf("SQL dialect to use. %v", knownDialects))
 	print_version = flag.Bool("version", false, "Print version information.")
 
 	writeDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
@@ -92,7 +95,14 @@ var escaper = strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "'", "\\'")
 
 // Escape a labelname for use in SQL as a column name.
 func escapeLabelName(s string) string {
-	return "labels['" + escaper.Replace(s) + "']"
+	escaped := "labels"
+	switch *dialect {
+	case "cockroach":
+		escaped += "->>'" + escaper.Replace(s) + "'"
+	default:
+		escaped += "['" + escaper.Replace(s) + "']"
+	}
+	return escaped
 }
 
 // Escape a labelvalue for use in SQL as a string value.
@@ -144,8 +154,14 @@ func queryToSQL(q *prompb.Query) (string, error) {
 			}
 		}
 	}
-	selectors = append(selectors, fmt.Sprintf("(timestamp <= %d)", q.EndTimestampMs))
-	selectors = append(selectors, fmt.Sprintf("(timestamp >= %d)", q.StartTimestampMs))
+
+	switch *dialect {
+	case "cockroach":
+		selectors = append(selectors, fmt.Sprintf("(timestamp BETWEEN div(%d,1000)::timestamp AND div(%d,1000)::timestamp)", q.StartTimestampMs, q.EndTimestampMs))
+	default:
+		selectors = append(selectors, fmt.Sprintf("(timestamp <= %d)", q.EndTimestampMs))
+		selectors = append(selectors, fmt.Sprintf("(timestamp >= %d)", q.StartTimestampMs))
+	}
 
 	return fmt.Sprintf(`SELECT labels, labels_hash, timestamp, value, "valueRaw" FROM metrics WHERE %s ORDER BY timestamp`, strings.Join(selectors, " AND ")), nil
 }
@@ -380,12 +396,26 @@ func loadConfig(filename string) (*config, error) {
 	return conf, nil
 }
 
+func checkDialect(d string) (bool, error) {
+	sort.Strings(knownDialects)
+	i := sort.SearchStrings(knownDialects, d)
+	if i < len(knownDialects) && knownDialects[i] == d {
+		return true, nil
+	}
+	return false, fmt.Errorf("unknown SQL dialect: %s: %v", d, knownDialects)
+}
+
 func main() {
 	flag.Parse()
 
 	if *print_version == true {
 		fmt.Println(version)
 		return
+	}
+
+	_, errd := checkDialect(*dialect)
+	if errd != nil {
+		log.Fatalf("Error selecting dialect: %v", errd)
 	}
 
 	conf, err := loadConfig(*configFile)
