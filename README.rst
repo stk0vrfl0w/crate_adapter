@@ -1,5 +1,5 @@
 ==========================
-CrateDB Prometheus Adapter
+CrateDB/CockroachDB Prometheus Adapter
 ==========================
 
 This is an adapter that accepts Prometheus remote read/write requests,
